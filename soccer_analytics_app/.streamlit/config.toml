@@ -1,6 +1,6 @@
 [server]
-# effectively no upload size limit (in MB)
-maxUploadSize = 100000
+# Increase max upload size to 20 GB (20000 MB)
+maxUploadSize = 20000
 
 
 
