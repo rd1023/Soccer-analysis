@@ -55,7 +55,8 @@ uploaded_video = st.sidebar.file_uploader(
     type=["mp4","mov","mkv"],
     accept_multiple_files=False,
     help="Upload full match recording without size limit"
-)",
+)
+",
     type=["mp4","mov","mkv"],
     accept_multiple_files=False
 )
@@ -143,3 +144,4 @@ with t4:
         st.plotly_chart(fig, use_container_width=True)
     else:
         st.write("No positional data.")
+
