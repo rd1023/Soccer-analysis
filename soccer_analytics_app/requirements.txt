@@ -1,13 +1,8 @@
-streamlit
-opencv-python
-pandas
-plotly
-moviepy
-scikit-learn
-matplotlib
-seaborn
-fpdf
-# AI model tools (add manually if needed)
-ultralytics
-torch
-whisper
+streamlit==1.39.0
+pandas==2.2.3
+plotly==5.24.1
+mplsoccer==1.2.4
+matplotlib==3.9.2
+reportlab==4.0.8
+seaborn==0.13.2
+numpy==1.26.4
