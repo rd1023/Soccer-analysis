@@ -1,4 +1,5 @@
 [server]
+[server]
 # Allow uploads up to 2048 MB (2 GB)
 maxUploadSize = 2048
 
