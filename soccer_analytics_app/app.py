@@ -36,12 +36,20 @@ st.markdown(
 # Landing Section
 # ----------------------------
 if 'video_uploaded' not in st.session_state:
-    st.image("https://via.placeholder.com/600x120?text=Soccer+Analytics+Pro", use_column_width=True)
-    st.title("Welcome to Soccer Analytics Pro")
-    st.write(
-        "Upload a full match recording (up to 2GB) to analyze events, timelines, and visualize your team's performance."
+    # Centered welcome container
+    st.markdown(
+        "<div style='display:flex;flex-direction:column;align-items:center;justify-content:center;'><img src='https://via.placeholder.com/800x150?text=Soccer+Analytics+Pro' style='max-width:80%;height:auto;'/></div>",
+        unsafe_allow_html=True
     )
-    if st.button("Get Started"):
+    st.markdown("# Welcome to Soccer Analytics Pro")
+    st.markdown(
+        "<p style='text-align:center;max-width:600px;margin:auto;'>" \
+        "Upload a full match recording to analyze every event, explore timelines, and visualize your team’s performance in-depth. " \
+        "Get insights across 95+ minutes of play.</p>",
+        unsafe_allow_html=True
+    )
+    # Call-to-action button
+    if st.button("🚀 Get Started", key='start_button'):
         st.session_state['video_uploaded'] = False
     st.stop()
 
@@ -52,22 +60,22 @@ st.sidebar.header("Upload & Filters")
 # Video uploader
 uploaded_video = st.sidebar.file_uploader(
     "Choose full match video",
-    type=["mp4","mov","mkv"],
+    type=["mp4", "mov", "mkv"],
     accept_multiple_files=False,
     help="Upload full match recording without size limit"
-)
-",
-    type=["mp4","mov","mkv"],
-    accept_multiple_files=False
 )
 if uploaded_video:
     temp = Path("/tmp")
     temp.mkdir(exist_ok=True)
     video_path = temp / uploaded_video.name
     with open(video_path, 'wb') as f:
-        for chunk in uploaded_video.chunks(1024*1024): f.write(chunk)
+        for chunk in uploaded_video.chunks(1024*1024):
+            f.write(chunk)
     st.sidebar.success(f"Saved: {uploaded_video.name}")
     st.session_state['video_uploaded'] = True
+    # Trigger analysis
+    with st.spinner("Analyzing full match—please wait..."):
+        subprocess.run(["python","main.py","--video_path",str(video_path)])['video_uploaded'] = True
     # Trigger analysis
     with st.spinner("Analyzing full match—please wait..."):
         subprocess.run(["python","main.py","--video_path",str(video_path)])
@@ -144,4 +152,3 @@ with t4:
         st.plotly_chart(fig, use_container_width=True)
     else:
         st.write("No positional data.")
-
