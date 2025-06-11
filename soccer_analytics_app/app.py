@@ -51,7 +51,11 @@ if 'video_uploaded' not in st.session_state:
 st.sidebar.header("Upload & Filters")
 # Video uploader
 uploaded_video = st.sidebar.file_uploader(
-    "Choose full match video (≤2GB)",
+    "Choose full match video",
+    type=["mp4","mov","mkv"],
+    accept_multiple_files=False,
+    help="Upload full match recording without size limit"
+)",
     type=["mp4","mov","mkv"],
     accept_multiple_files=False
 )
@@ -72,8 +76,8 @@ if 'video_uploaded' in st.session_state:
     st.sidebar.subheader("Filters")
     df = pd.read_json('output/match_events.json') if Path('output/match_events.json').exists() else pd.DataFrame()
     if not df.empty:
-        max_min = int(df['timestamp'].max()//60)
-        time_range = st.sidebar.slider("Minute range", 0, max_min, (0, max_min))
+        max_min = 135  # fixed to full match length of 135 minutes
+        time_range = st.sidebar.slider("Minute range (0–135 minutes)", 0, max_min, (0, max_min))
         types = df['type'].unique().tolist()
         selected = st.sidebar.multiselect("Event types", types, default=types)
     else:
