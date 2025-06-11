@@ -1,7 +1,15 @@
-[server]
-maxUploadSize = 20000   # in MB, effectively no limit
+# Streamlit configuration for server and theme
 
-[theme]
+\[server]
+
+# Allow large uploads (in MB) - effectively no limit
+
+maxUploadSize = 20000
+
+\[theme]
+
+# Custom UI theme for a polished look
+
 primaryColor = "#10B981"
 backgroundColor = "#F0F2F6"
 secondaryBackgroundColor = "#FFFFFF"
