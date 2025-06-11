@@ -24,12 +24,59 @@ os.environ['STREAMLIT_SERVER_MAX_UPLOAD_SIZE'] = '2048'
 # Custom CSS for clean look
 st.markdown(
     '''
-    <style>
-      body {background-color: #F0F2F6;}
-      #MainMenu, footer, header {visibility: hidden;}
-      .appview-container {padding: 1rem;}
-    </style>
-    ''', unsafe_allow_html=True
+    # ----------------------------
+# Landing Screen / Hero Section
+# ----------------------------
+if 'started' not in st.session_state:
+    # Hero banner
+    st.markdown(
+        """
+        <div style="
+            display:flex;
+            flex-direction:column;
+            align-items:center;
+            justify-content:center;
+            margin-top:50px;
+            margin-bottom:50px;
+        ">
+            <img src="https://via.placeholder.com/800x150?text=Soccer+Analytics+Pro" 
+                 style="max-width:80%; height:auto; border-radius:10px; box-shadow:0 4px 12px rgba(0,0,0,0.1);"/>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+    # Main heading
+    st.markdown(
+        "<h1 style='text-align:center; color:#333333; margin-bottom:10px;'>"
+        "Welcome to Soccer Analytics Pro</h1>",
+        unsafe_allow_html=True,
+    )
+
+    # Sub‐heading / description
+    st.markdown(
+        """
+        <p style="
+            text-align:center;
+            font-size:1.1em;
+            color:#555555;
+            max-width:600px;
+            margin:auto;
+        ">
+            Upload a full match recording (up to 20 GB) and get detailed event marking, timelines,
+            heatmaps and AI‐powered insights—all over a full 135-minute match.
+        </p>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # Call-to-Action button
+    if st.button("🚀 Get Started", key="landing_start"):
+        st.session_state.started = True
+
+    # Stop here until user clicks the button
+    st.stop()
+
 )
 
 # ----------------------------
