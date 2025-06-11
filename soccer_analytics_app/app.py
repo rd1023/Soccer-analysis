@@ -1,6 +1,3 @@
-import os
-# Set environment variable to allow large uploads (up to 2GB)
-os.environ['STREAMLIT_SERVER_MAX_UPLOAD_SIZE'] = '2048'
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -10,7 +7,7 @@ import subprocess
 from pathlib import Path
 
 # ----------------------------
-# Page & Server Configuration
+# Page Configuration & Styling
 # ----------------------------
 st.set_page_config(
     page_title="Soccer Analytics Pro",
@@ -18,42 +15,46 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="collapsed"
 )
-# Allow large uploads (up to 2GB)
-os.environ['STREAMLIT_SERVER_MAX_UPLOAD_SIZE'] = '2048'
-
-# Custom CSS for clean look
 st.markdown(
-    '''
-    # ----------------------------
+    """
+    <style>
+      #MainMenu, header, footer {visibility: hidden;}
+      body {background-color: #F0F2F6;}
+      .appview-container {padding: 1rem;}
+      .stButton>button {width: 100%; padding: 1rem; font-size: 1.1rem;}
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
+# ----------------------------
 # Landing Screen / Hero Section
 # ----------------------------
 if 'started' not in st.session_state:
-    # Hero banner
     st.markdown(
         """
         <div style="
-            display:flex;
-            flex-direction:column;
-            align-items:center;
-            justify-content:center;
-            margin-top:50px;
-            margin-bottom:50px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            margin-top: 50px;
+            margin-bottom: 50px;
         ">
-            <img src="https://via.placeholder.com/800x150?text=Soccer+Analytics+Pro" 
-                 style="max-width:80%; height:auto; border-radius:10px; box-shadow:0 4px 12px rgba(0,0,0,0.1);"/>
+            <img src="https://via.placeholder.com/1000x200?text=Soccer+Analytics+Pro"
+                 style="max-width:80%; height:auto; border-radius:10px; box-shadow:0 4px 12px rgba(0,0,0,0.1);" />
         </div>
         """,
         unsafe_allow_html=True
     )
-
-    # Main heading
     st.markdown(
-        "<h1 style='text-align:center; color:#333333; margin-bottom:10px;'>"
-        "Welcome to Soccer Analytics Pro</h1>",
-        unsafe_allow_html=True,
+        """
+        <h1 style="text-align:center; color:#333333; margin-bottom:10px;">
+            Welcome to Soccer Analytics Pro
+        </h1>
+        """,
+        unsafe_allow_html=True
     )
-
-    # Sub‐heading / description
     st.markdown(
         """
         <p style="
@@ -63,119 +64,93 @@ if 'started' not in st.session_state:
             max-width:600px;
             margin:auto;
         ">
-            Upload a full match recording (up to 20 GB) and get detailed event marking, timelines,
-            heatmaps and AI‐powered insights—all over a full 135-minute match.
+            Upload a full match recording (no size limit) to analyze every event,
+            explore timelines, and visualize your team's performance across 135 minutes.
         </p>
         """,
-        unsafe_allow_html=True,
+        unsafe_allow_html=True
     )
-
-    # Call-to-Action button
-    if st.button("🚀 Get Started", key="landing_start"):
+    if st.button("🚀 Get Started"):
         st.session_state.started = True
-
-    # Stop here until user clicks the button
-    st.stop()
-
-)
-
-# ----------------------------
-# Landing Section
-# ----------------------------
-if 'video_uploaded' not in st.session_state:
-    # Centered welcome container
-    st.markdown(
-        "<div style='display:flex;flex-direction:column;align-items:center;justify-content:center;'><img src='https://via.placeholder.com/800x150?text=Soccer+Analytics+Pro' style='max-width:80%;height:auto;'/></div>",
-        unsafe_allow_html=True
-    )
-    st.markdown("# Welcome to Soccer Analytics Pro")
-    st.markdown(
-        "<p style='text-align:center;max-width:600px;margin:auto;'>" \
-        "Upload a full match recording to analyze every event, explore timelines, and visualize your team’s performance in-depth. " \
-        "Get insights across 95+ minutes of play.</p>",
-        unsafe_allow_html=True
-    )
-    # Call-to-action button
-    if st.button("🚀 Get Started", key='start_button'):
-        st.session_state['video_uploaded'] = False
     st.stop()
 
 # ----------------------------
-# Sidebar: Controls & Video Upload
+# Sidebar: Upload & Filters
 # ----------------------------
 st.sidebar.header("Upload & Filters")
-# Video uploader
-uploaded_video = st.sidebar.file_uploader(
-    "Choose full match video",
+uploaded = st.sidebar.file_uploader(
+    "Upload full match recording (no size limit)",
     type=["mp4", "mov", "mkv"],
     accept_multiple_files=False,
-    help="Upload full match recording without size limit"
+    help="Drag and drop or browse for your full match video"
 )
-if uploaded_video:
-    temp = Path("/tmp")
-    temp.mkdir(exist_ok=True)
-    video_path = temp / uploaded_video.name
-    with open(video_path, 'wb') as f:
-        for chunk in uploaded_video.chunks(1024*1024):
+if uploaded:
+    tmp = Path('/tmp')
+    tmp.mkdir(exist_ok=True)
+    vpath = tmp / uploaded.name
+    with open(vpath, 'wb') as f:
+        for chunk in uploaded.chunks(1024 * 1024):
             f.write(chunk)
-    st.sidebar.success(f"Saved: {uploaded_video.name}")
-    st.session_state['video_uploaded'] = True
-    # Trigger analysis
+    st.sidebar.success(f"Saved: {uploaded.name}")
+    # Run your analysis pipeline
     with st.spinner("Analyzing full match—please wait..."):
-        subprocess.run(["python","main.py","--video_path",str(video_path)])['video_uploaded'] = True
-    # Trigger analysis
-    with st.spinner("Analyzing full match—please wait..."):
-        subprocess.run(["python","main.py","--video_path",str(video_path)])
+        subprocess.run(["python", "main.py", "--video_path", str(vpath)], check=True)
+    st.sidebar.success("Analysis complete.")
 
-# Time and event filters
-if 'video_uploaded' in st.session_state:
-    st.sidebar.subheader("Filters")
-    df = pd.read_json('output/match_events.json') if Path('output/match_events.json').exists() else pd.DataFrame()
-    if not df.empty:
-        max_min = 135  # fixed to full match length of 135 minutes
-        time_range = st.sidebar.slider("Minute range (0–135 minutes)", 0, max_min, (0, max_min))
-        types = df['type'].unique().tolist()
-        selected = st.sidebar.multiselect("Event types", types, default=types)
-    else:
-        time_range, selected = (0,0), []
+# Load or fallback to sample data
+events = []
+out = Path('output/match_events.json')
+if out.exists():
+    events = json.loads(out.read_text())
 else:
-    st.write("No video uploaded yet.")
-    st.stop()
+    sample = Path('sample_data/sample_events.json')
+    if sample.exists():
+        events = json.loads(sample.read_text())
+df = pd.json_normalize(events) if events else pd.DataFrame()
+
+# Sidebar filters
+time_min, time_max = 0, 135
+selected_types = []
+if not df.empty:
+    time_min, time_max = st.sidebar.slider("Minute range", 0, 135, (0, 135))
+    types = df['type'].unique().tolist()
+    selected_types = st.sidebar.multiselect("Event types", types, default=types)
+
+# Apply filters
+if not df.empty and selected_types:
+    df = df[(df['timestamp'] / 60 >= time_min) & (df['timestamp'] / 60 <= time_max)]
+    df = df[df['type'].isin(selected_types)]
 
 # ----------------------------
-# Header Display
+# Header: Teams & Date
 # ----------------------------
-col1, col2, col3 = st.columns([1,6,1])
-with col1: st.image("https://via.placeholder.com/80?text=Home", width=80)
+col1, col2, col3 = st.columns([1, 6, 1])
+with col1:
+    st.image('https://via.placeholder.com/80?text=Home', width=80)
 with col2:
     st.markdown("### Home FC vs Away United")
-    st.markdown("#### Match Date: 2025-06-10")
-with col3: st.image("https://via.placeholder.com/80?text=Away", width=80)
+    st.markdown("**Date:** 2025-06-10")
+with col3:
+    st.image('https://via.placeholder.com/80?text=Away', width=80)
 st.markdown("---")
 
 # ----------------------------
-# Main Tabs
+# Main Content Tabs
 # ----------------------------
-t1,t2,t3,t4 = st.tabs(["📊 Summary","📋 Events","⏱ Timeline","⚽ Pitch Map"])
-
-# Load and filter data
-df = pd.read_json('output/match_events.json') if Path('output/match_events.json').exists() else pd.DataFrame()
-if not df.empty:
-    df = df[(df['timestamp']/60>=time_range[0])&(df['timestamp']/60<=time_range[1])]
-    df = df[df['type'].isin(selected)]
+t1, t2, t3, t4 = st.tabs(["📊 Overview", "📋 Events", "⏱ Timeline", "⚽ Pitch Map"])
 
 with t1:
     st.subheader("Match Overview")
     if df.empty:
-        st.info("No events detected.")
+        st.info("No data to display.")
     else:
-        shots = int((df['type']=='shot').sum())
-        xg = round(df['xG'].sum(),2) if 'xG' in df else 0.0
-        poss = int((df['type']=='possession').sum())
+        shots = int((df['type'] == 'shot').sum())
+        xg = round(df.get('xG', pd.Series()).sum(), 2)
+        corners = int((df['type'] == 'corner').sum())
         cols = st.columns(3)
-        cols[0].metric("Total Shots", shots)
+        cols[0].metric("Shots", shots)
         cols[1].metric("Total xG", xg)
-        cols[2].metric("Possession Changes", poss)
+        cols[2].metric("Corners", corners)
 
 with t2:
     st.subheader("Events Table")
@@ -184,18 +159,26 @@ with t2:
 with t3:
     st.subheader("Event Timeline")
     if not df.empty:
-        df['min']=(df['timestamp']//60).astype(int)
-        tl=df.groupby(['min','type']).size().reset_index(name='count')
-        fig=px.bar(tl, x='min', y='count', color='type', barmode='group')
+        df['min'] = (df['timestamp'] // 60).astype(int)
+        tl = df.groupby(['min', 'type']).size().reset_index(name='count')
+        fig = px.bar(tl, x='min', y='count', color='type', barmode='group')
         st.plotly_chart(fig, use_container_width=True)
     else:
         st.write("No timeline data.")
 
 with t4:
     st.subheader("Pitch Map")
-    if not df.empty and 'x_m' in df:
-        fig=go.Figure(); fig.update_layout(xaxis=dict(range=[0,105],visible=False), yaxis=dict(range=[0,68],visible=False), height=400)
-        fig.add_trace(go.Scatter(x=df['x_m'],y=df['y_m'],mode='markers',marker=dict(size=8,color='blue')))
+    if not df.empty and 'x_m' in df.columns:
+        fig = go.Figure()
+        fig.update_layout(
+            xaxis=dict(range=[0, 105], visible=False),
+            yaxis=dict(range=[0, 68], visible=False),
+            height=400,
+            margin=dict(l=0, r=0, t=0, b=0)
+        )
+        fig.add_trace(go.Scatter(x=df['x_m'], y=df['y_m'], mode='markers',
+                                 marker=dict(size=10, color='red')))
         st.plotly_chart(fig, use_container_width=True)
     else:
         st.write("No positional data.")
+
