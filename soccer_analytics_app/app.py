@@ -5,15 +5,23 @@ import plotly.graph_objects as go
 import json
 import subprocess
 from pathlib import Path
+# 1) Use your theme from config.toml – no need for inline CSS here
 
-# ----------------------------
-# Page Configuration & Styling
-# ----------------------------
-st.set_page_config(
-    page_title="Soccer Analytics Pro",
-    page_icon="⚽",
-    layout="wide",
-    initial_sidebar_state="collapsed"
+# 2) Set up a bold, two‐column hero header
+col1, col2 = st.columns([2,3], gap="large")
+with col1:
+    st.image("https://via.placeholder.com/1200x200?text=Lulu+Soccer+Match+Intelligence",
+             use_column_width=True)
+with col2:
+    st.markdown("## Soccer Match Intelligence")
+    st.markdown(
+        "Analyze full 135′ matches with event marking, timelines, heatmaps, "
+        "and AI insights—all in one place."
+    )
+    if st.button("🚀 Upload & Analyze", use_container_width=True):
+        st.session_state.started = True
+st.markdown("---")
+
 )
 st.markdown(
     """
