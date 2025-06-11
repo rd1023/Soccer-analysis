@@ -1,107 +1,166 @@
-# Main Streamlit App with full AI features
 import streamlit as st
 import pandas as pd
-from utils.tagging import create_event, save_events
-from utils.overlay import plot_event_on_field
-from utils.player_report import generate_player_report
-from utils.ai_tagging import detect_xg_moments
-from utils.pdf_export import generate_pdf_report
-from utils.xg_model import calculate_xg
-from utils.heatmap import plot_heatmap
-from utils.scouting_report import generate_scouting_report
-from utils.yolo_tagging import detect_with_yolo
-from utils.whisper_tagging import detect_voice_tags
-from utils.match_summary import generate_summary
-import time
+import plotly.express as px
+import plotly.graph_objects as go
+import json
+import subprocess
+from pathlib import Path
 
-st.set_page_config(layout="wide")
-st.title("Lulu Analysis - Soccer Match Intelligence")
+# ----------------------------
+# Page & Server Configuration
+# ----------------------------
+st.set_page_config(
+    page_title='Soccer Analytics Pro',
+    page_icon='⚽',
+    layout='wide',
+    initial_sidebar_state='expanded'
+)
+# Allow large uploads (up to 2GB)
+st.set_option('server.maxUploadSize', 2048)
+# Hide Streamlit branding UI elements
+st.markdown(
+    '''
+    <style>
+      #MainMenu {visibility: hidden;}
+      header {visibility: hidden;}
+      footer {visibility: hidden;}
+    </style>
+    ''', unsafe_allow_html=True
+)
 
-st.sidebar.header("Upload Match Video")
-video = st.sidebar.file_uploader("Choose a .mp4 file", type=["mp4"])
-audio = st.sidebar.file_uploader("Optional: Upload audio for voice tagging (.wav)", type=["wav"])
+# ----------------------------
+# Authentication (Stub)
+# ----------------------------
+from streamlit_authenticator import Authenticate
+credentials = {'usernames': {'admin': {'name': 'Admin', 'password': 'abc123'}}}
+auth = Authenticate(credentials, 'cookie', 'signature_key', cookie_expiry_days=1)
+user, auth_status = auth.login('Login', 'sidebar')
+if not auth_status:
+    st.stop()
 
-event_log = []
+# ----------------------------
+# Sidebar: Controls & Upload
+# ----------------------------
+st.sidebar.title('Controls')
+from streamlit_lottie import st_lottie
+import urllib.request
+lottie_url = 'https://assets1.lottiefiles.com/packages/lf20_jcikwtux.json'
+st_lottie(json.loads(urllib.request.urlopen(lottie_url).read()), height=150)
 
-if video:
-    st.video(video)
+# Video uploader
+uploaded_video = st.sidebar.file_uploader(
+    'Upload full match video (≤2GB)', type=['mp4','mov','mkv']
+)
+# Filters
+time_min, time_max = st.sidebar.slider('Minute range', 0, 95, (0, 95))
+event_types = ['shot','cross','duel','pass','corner','foul','offside']
+selected_types = st.sidebar.multiselect('Event types', event_types, default=event_types)
+# AI insights toggle
+show_ai = st.sidebar.checkbox('Enable AI Insights')
 
-    st.sidebar.header("Tag Event")
-    timestamp = st.sidebar.number_input("Timestamp (seconds)", step=1)
-    event_type = st.sidebar.selectbox("Event Type", ["Pass", "Shot", "Goal", "Tackle", "Interception", "Dribble", "Clearance"])
-    player = st.sidebar.text_input("Player Name/#")
-    location = st.sidebar.text_input("Location (e.g. 200,150 for X,Y)")
-    notes = st.sidebar.text_area("Additional Notes")
+# ----------------------------
+# Handle Video & Analysis
+# ----------------------------
+video_path = None
+if uploaded_video:
+    tmp = Path('/tmp')
+    tmp.mkdir(exist_ok=True)
+    video_path = tmp / uploaded_video.name
+    with open(video_path, 'wb') as f:
+        for chunk in uploaded_video.chunks(1024*1024):
+            f.write(chunk)
+    st.sidebar.success(f'Saved {uploaded_video.name}')
+    # Run analysis once per session
+    if 'analyzed' not in st.session_state:
+        with st.spinner('Analyzing full match, please wait...'):
+            subprocess.run(['python','main.py','--video_path',str(video_path)], check=True)
+            st.session_state['analyzed'] = True
 
-    if st.sidebar.button("Tag Event"):
-        event = create_event(event_type, timestamp, player, location, notes)
-        if event_type == "Shot":
-            event["xG"] = calculate_xg(event)
-        event_log.append(event)
-        st.success(f"Event tagged: {event_type} at {timestamp}s")
+# ----------------------------
+# Load & Filter Events
+# ----------------------------
+events = []
+data_file = Path('output/match_events.json')
+if data_file.exists():
+    events = json.loads(data_file.read_text())
+else:
+    sample = Path('sample_data/sample_events.json')
+    if sample.exists(): events = json.loads(sample.read_text())
 
-    if st.sidebar.button("Run AI Detection"):
-        st.info("Running AI xG tagging (mock)...")
-        ai_events = detect_xg_moments(video.name)
-        for event in ai_events:
-            if event["Event Type"] == "Shot":
-                event["xG"] = calculate_xg(event)
-        event_log.extend(ai_events)
-        st.success(f"{len(ai_events)} xG moments detected.")
+df = pd.json_normalize(events) if events else pd.DataFrame()
+if not df.empty:
+    df = df[(df['timestamp']/60 >= time_min) & (df['timestamp']/60 <= time_max)]
+    df = df[df['type'].isin(selected_types)]
 
-    if st.sidebar.button("YOLO Auto Tagging"):
-        yolo_events = detect_with_yolo(video.name)
-        for event in yolo_events:
-            if event["Event Type"] == "Shot":
-                event["xG"] = calculate_xg(event)
-        event_log.extend(yolo_events)
-        st.success(f"{len(yolo_events)} events auto-tagged by YOLO.")
+# ----------------------------
+# Header: Teams & Date
+# ----------------------------
+home, away = 'Home FC','Away United'
+date = '2025-06-10'
+col1, col2, col3 = st.columns([1,6,1])
+with col1: st.image('assets/home_logo.png', width=80)
+with col2:
+    st.markdown(f'# {home} vs {away}')
+    st.markdown(f'**Date:** {date}')
+with col3: st.image('assets/away_logo.png', width=80)
+st.markdown('---')
 
-    if audio and st.sidebar.button("Whisper Voice Tagging"):
-        voice_tags = detect_voice_tags(audio.name)
-        for event in voice_tags:
-            if event["Event Type"] == "Shot":
-                event["xG"] = calculate_xg(event)
-        event_log.extend(voice_tags)
-        st.success(f"{len(voice_tags)} events tagged via voice commands.")
+# ----------------------------
+# Compute Overview Stats
+# ----------------------------
+def compute_stats(df):
+    if df.empty: return {}
+    return {
+        'Shots': int((df['type']=='shot').sum()),
+        'Corners': int((df['type']=='corner').sum()),
+        'Fouls': int((df['type']=='foul').sum()),
+        'Offsides': int((df['type']=='offside').sum()),
+        'xG': round(df.get('xG', pd.Series()).sum(),2)
+    }
+stats = compute_stats(df)
 
-    if st.sidebar.button("Save Events"):
-        save_events(event_log)
-        st.success("Events saved to CSV")
+# ----------------------------
+# Main Tabs
+# ----------------------------
+t1,t2,t3,t4,t5 = st.tabs([
+    '📊 Overview','📋 Events','⏱ Timeline','⚽ Pitch','🔍 AI'
+])
 
-    st.header("Tagged Events Log")
-    if event_log:
-        df_log = pd.DataFrame(event_log)
-        st.dataframe(df_log)
+with t1:
+    st.subheader('Match Overview')
+    if not stats: st.info('No data available.')
+    else:
+        cols = st.columns(len(stats))
+        for i,(k,v) in enumerate(stats.items()): cols[i].metric(k, v)
 
-        if st.button("Generate Match PDF Report"):
-            generate_pdf_report(event_log)
-            st.success("Match report saved to output/reports/match_report.pdf")
+with t2:
+    st.subheader('Events Table')
+    st.dataframe(df, use_container_width=True)
 
-        if st.button("Generate Scouting Report"):
-            generate_scouting_report(event_log)
-            st.success("Scouting report saved to output/reports/scouting_report.pdf")
+with t3:
+    st.subheader('Event Timeline')
+    if not df.empty:
+        df['min'] = (df['timestamp']//60).astype(int)
+        tl = df.groupby(['min','type']).size().reset_index(name='count')
+        fig=px.bar(tl,x='min',y='count',color='type',barmode='group')
+        st.plotly_chart(fig, use_container_width=True)
 
-        if st.button("Generate AI Match Summary"):
-            summary = generate_summary(event_log)
-            st.text_area("AI Match Summary", value=summary, height=150)
+with t4:
+    st.subheader('Pitch Map')
+    if not df.empty and 'x_m' in df:
+        fig=go.Figure();fig.update_layout(xaxis=dict(range=[0,105],visible=False),yaxis=dict(range=[0,68],visible=False),height=400)
+        fig.add_trace(go.Scatter(x=df['x_m'],y=df['y_m'],mode='markers',marker=dict(size=8,color='blue')))
+        st.plotly_chart(fig, use_container_width=True)
+    else: st.info('No positional data.')
 
-    st.header("Player Report + Heatmap")
-    uploaded_file = st.file_uploader("Upload tagged events CSV", type=["csv"])
-    if uploaded_file:
-        df = pd.read_csv(uploaded_file)
-        player_query = st.text_input("Enter player name/#")
-        if player_query:
-            report = generate_player_report(df, player_query)
-            st.subheader("Event Count")
-            st.dataframe(report)
-            heatmap = plot_heatmap(df, player_query)
-            if heatmap:
-                st.pyplot(heatmap)
-            else:
-                st.warning("No location data available for heatmap.")
-
-    st.header("Tactical Overlay")
-    if st.button("Sample Event on Field"):
-        fig = plot_event_on_field((200, 120))
-        st.pyplot(fig)
+with t5:
+    st.subheader('AI Insights')
+    if show_ai and not df.empty:
+        q=st.text_input('Ask AI about data:')
+        if st.button('Submit'):
+            openai.api_key=st.secrets['OPENAI_API_KEY']
+            prompt=f"Data cols: {df.columns.tolist()}. Question: {q}."
+            res=openai.ChatCompletion.create(model='gpt-4',messages=[{'role':'user','content':prompt}])
+            st.write(res.choices[0].message.content)
+    else:
+        st.write('Enable AI Insights via sidebar.')
