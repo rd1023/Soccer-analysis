@@ -1,5 +1,6 @@
 [server]
-# Set to a very high number (in MB) so effectively no limit
+# effectively no upload size limit (in MB)
 maxUploadSize = 100000
+
 
 
