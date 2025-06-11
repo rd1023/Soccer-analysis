@@ -1,4 +1,700 @@
-git clone https://github.com/Lulu-Soccer/Lulu-Analysis.git
-cd Lulu-Analysis
-pip install -r requirements.txt
-streamlit run app.py
+import streamlit as st
+import pandas as pd
+import plotly.express as px
+from streamlit_gsheets import GSheetsConnection
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.mime.application import MIMEApplication
+from mplsoccer import Pitch
+import matplotlib.pyplot as plt
+import matplotlib.animation as animation
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
+from google.oauth2 import service_account
+import io
+import os
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib import colors
+import seaborn as sns
+import numpy as np
+
+# App title
+st.title("Coach's Soccer Analysis App: Pro Ultimate")
+
+# Mobile optimization CSS
+st.markdown("""
+<style>
+    .stButton > button {
+        width: 100%;
+        font-size: 16px;
+        padding: 10px;
+    }
+    .stTextInput > input, .stSelectbox > select {
+        font-size: 16px;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# Google Sheets and Drive connection
+conn = st.connection("gsheets", type=GSheetsConnection)
+SCOPES = ['https://www.googleapis.com/auth/drive']
+creds = service_account.Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=SCOPES)
+drive_service = build('drive', 'v3', credentials=creds)
+
+# Load data
+@st.cache_data(ttl=600)
+def load_data(worksheet):
+    try:
+        df = conn.read(worksheet=worksheet, usecols=list(range(53 if worksheet == "Matches" else 10)))
+        return df.dropna(how="all")
+    except Exception as e:
+        st.error(f"Failed to load {worksheet}: {e}")
+        columns = {
+            "Matches": [
+                "Timestamp", "Date", "Opponent", "Venue", "Formation", "Weather", "Our Score",
+                "Opponent Score", "Possession (%)", "Shots", "Shots on Target", "Passes Attempted",
+                "Passes Completed", "Corners", "Free Kicks", "Offsides", "Fouls Committed",
+                "Fouls Suffered", "Yellow Cards", "Red Cards", "Throw-Ins", "Goal Kicks",
+                "Player Goals", "Player Assists", "Player Shots", "Player Passes", "Player Tackles",
+                "Player Interceptions", "Player Dribbles", "Player Distance (km)", "Player Sprints",
+                "Player Minutes", "Notes", "Video Link", "Expected Goals (xG)",
+                "Opponent Expected Goals (xG)", "Pass Completion (%)", "Possession Zones",
+                "Expected Assists (xA)", "Expected Threat (xT)", "PPDA", "Progressive Passes",
+                "Line-Breaking Passes", "Field Tilt (%)", "High Metabolic Load Distance (HMLD)",
+                "Shot-Creating Actions (SCA)", "Goal-Creating Actions (GCA)", "Set Piece Outcomes",
+                "Tackles Successful", "Tackles Attempted", "Dribbles Successful", "Dribbles Attempted",
+                "Crosses Successful", "Crosses Attempted"
+            ],
+            "Players": ["Name", "Position", "Photo URL", "Average Position (x,y)", "Created Timestamp"],
+            "Training": ["Timestamp", "Date", "Session Name", "Description", "Drills"],
+            "LiveStats": ["Match Date", "Timestamp", "Event Type", "Player", "Details", "Collaborators"],
+            "Opponents": ["Timestamp", "Opponent Name", "Formation", "Key Players", "Strengths", "Weaknesses"]
+        }
+        return pd.DataFrame(columns=columns[worksheet])
+
+# Save data
+def save_data(df, worksheet):
+    try:
+        conn.update(worksheet=worksheet, data=df)
+        st.cache_data.clear()
+    except Exception as e:
+        st.error(f"Failed to save {worksheet}: {e}")
+
+# Upload video
+def upload_video(file, folder_id):
+    try:
+        file_metadata = {'name': file.name, 'parents': [folder_id]}
+        media = MediaFileUpload(file, mimetype='video/mp4')
+        file = drive_service.files().create(
+            body=file_metadata, media_body=media, fields='id,webViewLink'
+        ).execute()
+        return file.get('webViewLink')
+    except Exception as e:
+        st.error(f"Video upload failed: {e}")
+        return None
+
+# Email notification
+def send_email(subject, body, recipients, pdf_path=None):
+    try:
+        msg = MIMEMultipart()
+        msg['Subject'] = subject
+        msg['From'] = st.secrets["email"]["sender"]
+        msg['To'] = ", ".join(recipients)
+        msg.attach(MIMEText(body, 'plain'))
+        if pdf_path:
+            with open(pdf_path, "rb") as f:
+                part = MIMEApplication(f.read(), Name="match_report.pdf")
+                part['Content-Disposition'] = 'attachment; filename="match_report.pdf"'
+                msg.attach(part)
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(st.secrets["email"]["sender"], st.secrets["email"]["password"])
+            server.sendmail(st.secrets["email"]["sender"], recipients, msg.as_string())
+        st.success("Email sent!")
+    except Exception as e:
+        st.error(f"Email failed: {e}")
+
+# Generate heatmap
+def generate_heatmap(positions):
+    pitch = Pitch(pitch_color='grass', line_color='white')
+    fig, ax = pitch.draw()
+    if positions:
+        x, y = [], []
+        for pos in positions.split(";"):
+            try:
+                _, xy = pos.split(":")
+                x_val, y_val = map(float, xy.split(","))
+                x.append(x_val)
+                y.append(y_val)
+            except:
+                pass
+        if x:
+            sns.kdeplot(x=x, y=y, fill=True, cmap='viridis', alpha=0.5, ax=ax)
+    return fig
+
+# Generate PDF report
+def generate_pdf_report(match_data, analysis):
+    pdf_path = "match_report.pdf"
+    doc = SimpleDocTemplate(pdf_path, pagesize=letter)
+    styles = getSampleStyleSheet()
+    elements = []
+
+    elements.append(Paragraph("Match Report", styles['Title']))
+    elements.append(Spacer(1, 12))
+    elements.append(Paragraph(f"Timestamp: {match_data['Timestamp']}", styles['Normal']))
+    elements.append(Paragraph(f"Date: {match_data['Date']}", styles['Normal']))
+    elements.append(Paragraph(f"Opponent: {match_data['Opponent']}", styles['Normal']))
+    elements.append(Paragraph(f"Score: {match_data['Our Score']} - {match_data['Opponent Score']}", styles['Normal']))
+    elements.append(Spacer(1, 12))
+
+    elements.append(Paragraph("Match Summary", styles['Heading2']))
+    elements.append(Paragraph(f"Key Moments: {match_data['Notes']}", styles['Normal']))
+    elements.append(Paragraph(f"Video: {match_data['Video Link']}", styles['Normal']))
+    elements.append(Spacer(1, 12))
+
+    # Calculate success rates
+    tackle_success = (match_data['Tackles Successful'] / match_data['Tackles Attempted'] * 100) if match_data['Tackles Attempted'] > 0 else 0
+    dribble_success = (match_data['Dribbles Successful'] / match_data['Dribbles Attempted'] * 100) if match_data['Dribbles Attempted'] > 0 else 0
+    cross_success = (match_data['Crosses Successful'] / match_data['Crosses Attempted'] * 100) if match_data['Crosses Attempted'] > 0 else 0
+
+    elements.append(Paragraph("Team Performance", styles['Heading2']))
+    team_data = [
+        ["Metric", "Our Team", "Opponent"],
+        ["Possession (%)", f"{match_data['Possession (%)']}", f"{100 - match_data['Possession (%)']}"],
+        ["Shots (On Target/Total)", f"{match_data['Shots on Target']}/{match_data['Shots']}", "-"],
+        ["Passes (Completed/Attempted)", f"{match_data['Passes Completed']}/{match_data['Passes Attempted']}", "-"],
+        ["Pass Completion (%)", f"{match_data['Pass Completion (%)']:.1f}", "-"],
+        ["Tackles (Successful/Attempted)", f"{match_data['Tackles Successful']}/{match_data['Tackles Attempted']}", "-"],
+        ["Tackle Success (%)", f"{tackle_success:.1f}", "-"],
+        ["Dribbles (Successful/Attempted)", f"{match_data['Dribbles Successful']}/{match_data['Dribbles Attempted']}", "-"],
+        ["Dribble Success (%)", f"{dribble_success:.1f}", "-"],
+        ["Crosses (Successful/Attempted)", f"{match_data['Crosses Successful']}/{match_data['Crosses Attempted']}", "-"],
+        ["Cross Success (%)", f"{cross_success:.1f}", "-"],
+        ["Expected Goals (xG)", f"{match_data['Expected Goals (xG)']:.1f}", f"{match_data['Opponent Expected Goals (xG)']:.1f}"],
+        ["Field Tilt (%)", f"{match_data['Field Tilt (%)']}", f"{100 - match_data['Field Tilt (%)']}"],
+        ["PPDA", f"{match_data['PPDA']}", "-"],
+        ["Set Pieces", f"{match_data['Set Piece Outcomes']}", "-"]
+    ]
+    table = Table(team_data)
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black)
+    ]))
+    elements.append(table)
+    elements.append(Spacer(1, 12))
+
+    elements.append(Paragraph("Player Performance", styles['Heading2']))
+    player_data = [
+        ["Metric", "Value"],
+        ["Goals", match_data['Player Goals']],
+        ["Assists", match_data['Player Assists']],
+        ["Shot-Creating Actions (SCA)", match_data['Shot-Creating Actions (SCA)']],
+        ["Goal-Creating Actions (GCA)", match_data['Goal-Creating Actions (GCA)']],
+        ["Expected Assists (xA)", f"{match_data['Expected Assists (xA)']:.1f}"],
+        ["HMLD (km)", f"{match_data['High Metabolic Load Distance (HMLD)']}"],
+        ["Evaluations", match_data.get('Player Evaluations', '')]
+    ]
+    player_table = Table(player_data)
+    player_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black)
+    ]))
+    elements.append(player_table)
+    elements.append(Spacer(1, 12))
+
+    elements.append(Paragraph("Tactical Analysis", styles['Heading2']))
+    elements.append(Paragraph(f"Formation: {match_data['Formation']}", styles['Normal']))
+    elements.append(Paragraph(f"Possession Zones: {match_data['Possession Zones']}", styles['Normal']))
+    elements.append(Paragraph(f"Set Pieces: {match_data['Set Piece Outcomes']}", styles['Normal']))
+    elements.append(Paragraph(f"Key Moments: {match_data['Notes']}", styles['Normal']))
+    elements.append(Paragraph(f"Opponent Analysis: {analysis}", styles['Normal']))
+    elements.append(Spacer(1, 12))
+
+    elements.append(Paragraph("Recommendations", styles['Heading2']))
+    recommendations = f"Adjust pressing (PPDA: {match_data['PPDA']}). Focus on {match_data['Possession Zones']}. Improve tackle success ({tackle_success:.1f}%)."
+    elements.append(Paragraph(recommendations, styles['Normal']))
+    elements.append(Spacer(1, 12))
+
+    # Add heatmap
+    heatmap_fig = generate_heatmap(match_data.get("Formation Positions", ""))
+    heatmap_fig.savefig("heatmap.png")
+    elements.append(Paragraph("Player Heatmap", styles['Heading2']))
+    elements.append(Image("heatmap.png", width=400, height=300))
+
+    doc.build(elements)
+    return pdf_path
+
+# Tabs for navigation
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["Add Match", "Match History", "Training Plans", "Player Roster", "Live Tracking", "Match Analysis", "Opponent Scouting"])
+
+# Tab 1: Add Match
+with tab1:
+    st.subheader("Add New Match")
+    players_df = load_data("Players")
+    players = players_df["Name"].tolist() if not players_df.empty else []
+    
+    with st.form("match_form"):
+        # Match details
+        col1, col2 = st.columns(2)
+        with col1:
+            date = st.date_input("Match Date")
+            opponent = st.text_input("Opponent Team")
+            venue = st.selectbox("Venue", ["Home", "Away"])
+        with col2:
+            formation = st.text_input("Formation (e.g., 4-4-2)")
+            weather = st.text_input("Weather (e.g., Sunny, Rain)")
+        
+        # Team stats
+        st.write("**Team Stats**")
+        col3, col4 = st.columns(2)
+        with col3:
+            our_score = st.number_input("Our Score", min_value=0, step=1)
+            possession = st.number_input("Possession (%)", min_value=0, max_value=100, step=1)
+            shots = st.number_input("Shots", min_value=0, step=1)
+            shots_on_target = st.number_input("Shots on Target", min_value=0, step=1)
+            passes_attempted = st.number_input("Passes Attempted", min_value=0, step=1)
+            passes_completed = st.number_input("Passes Completed", min_value=0, step=1)
+        with col4:
+            corners = st.number_input("Corners", min_value=0, step=1)
+            free_kicks = st.number_input("Free Kicks", min_value=0, step=1)
+            offsides = st.number_input("Offsides", min_value=0, step=1)
+            fouls_committed = st.number_input("Fouls Committed", min_value=0, step=1)
+            fouls_suffered = st.number_input("Fouls Suffered", min_value=0, step=1)
+        
+        col5, col6 = st.columns(2)
+        with col5:
+            yellow_cards = st.number_input("Yellow Cards", min_value=0, step=1)
+            red_cards = st.number_input("Red Cards", min_value=0, step=1)
+        with col6:
+            throw_ins = st.number_input("Throw-Ins", min_value=0, step=1)
+            goal_kicks = st.number_input("Goal Kicks", min_value=0, step=1)
+
+        # Attempt tracking
+        st.write("**Attempt Tracking**")
+        col9, col10 = st.columns(2)
+        with col9:
+            tackles_successful = st.number_input("Tackles Successful", min_value=0, step=1)
+            tackles_attempted = st.number_input("Tackles Attempted", min_value=0, step=1)
+            dribbles_successful = st.number_input("Dribbles Successful", min_value=0, step=1)
+            dribbles_attempted = st.number_input("Dribbles Attempted", min_value=0, step=1)
+        with col10:
+            crosses_successful = st.number_input("Crosses Successful", min_value=0, step=1)
+            crosses_attempted = st.number_input("Crosses Attempted", min_value=0, step=1)
+
+        # Advanced metrics
+        st.write("**Advanced Metrics**")
+        col7, col8 = st.columns(2)
+        with col7:
+            xg = st.number_input("Expected Goals (xG)", min_value=0.0, step=0.1)
+            xa = st.number_input("Expected Assists (xA)", min_value=0.0, step=0.1)
+            xt = st.number_input("Expected Threat (xT)", min_value=0.0, step=0.1)
+            ppda = st.number_input("Passes per Defensive Action (PPDA)", min_value=0.0, step=0.1)
+        with col8:
+            progressive_passes = st.number_input("Progressive Passes", min_value=0, step=1)
+            line_breaking_passes = st.number_input("Line-Breaking Passes", min_value=0, step=1)
+            field_tilt = st.number_input("Field Tilt (%)", min_value=0, max_value=100, step=1)
+            hmld = st.number_input("High Metabolic Load Distance (km)", min_value=0.0, step=0.1)
+        
+        sca = st.number_input("Shot-Creating Actions (SCA)", min_value=0, step=1)
+        gca = st.number_input("Goal-Creating Actions (GCA)", min_value=0, step=1)
+        possession_zones = st.text_input("Possession Zones (e.g., Defensive:30%, Midfield:50%, Attacking:20%)")
+        opponent_xg = st.number_input("Opponent Expected Goals (xG)", min_value=0.0, step=0.1)
+        set_piece_outcomes = st.text_input("Set Piece Outcomes (e.g., Corner:Goal, Free Kick:Shot)")
+
+        # Player stats
+        st.write("**Player Stats**")
+        player_goals = st.multiselect("Goals (select players)", players, key="goals")
+        player_assists = st.multiselect("Assists (select players)", players, key="assists")
+        player_shots = st.multiselect("Shots (select players)", players, key="shots")
+        player_minutes = st.multiselect("Minutes Played (select players)", players, key="minutes")
+        player_evals = st.text_area("Player Evaluations (e.g., Player1: Passing 8/10, Shooting 7/10)")
+        
+        # Tactical diagram
+        st.write("**Tactical Diagram**")
+        formation_positions = st.text_input("Formation Positions (e.g., Player1:ST,10,20)")
+        shot_locations = st.text_input("Shot Locations (e.g., Player1:10,20; Player2:15,30)")
+        
+        # Video upload
+        st.write("**Video Analysis**")
+        video_file = st.file_uploader("Upload Match Video (MP4)", type="mp4")
+        video_tags = st.text_input("Video Tags (e.g., Goal:1:30, Foul:45:00)")
+        folder_id = st.secrets["gcp_service_account"]["folder_id"]
+        
+        # Notes and analysis
+        notes = st.text_area("Notes (e.g., tactics, injuries)")
+        tactical_analysis = st.text_area("Tactical Analysis (e.g., pressing intensity, set-piece success)")
+        opponent_score = st.number_input("Opponent Score", min_value=0, step=1)
+        collaborators = st.text_input("Collaborators (e.g., Assistant Coach)")
+        email_recipients = st.text_input("Email Results To (comma-separated emails)")
+        submitted = st.form_submit_button("Save Match")
+
+        if submitted:
+            if shots_on_target > shots:
+                st.error("Shots on target cannot exceed total shots.")
+            elif passes_completed > passes_attempted:
+                st.error("Passes completed cannot exceed passes attempted.")
+            elif tackles_successful > tackles_attempted:
+                st.error("Successful tackles cannot exceed attempted tackles.")
+            elif dribbles_successful > dribbles_attempted:
+                st.error("Successful dribbles cannot exceed attempted dribbles.")
+            elif crosses_successful > crosses_attempted:
+                st.error("Successful crosses cannot exceed attempted crosses.")
+            else:
+                video_link = upload_video(video_file, folder_id) if video_file else ""
+                pass_completion = (passes_completed / passes_attempted * 100) if passes_attempted > 0 else 0
+                timestamp = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
+                new_match = {
+                    "Timestamp": timestamp,
+                    "Date": date.strftime("%Y-%m-%d"),
+                    "Opponent": opponent,
+                    "Venue": venue,
+                    "Formation": formation,
+                    "Weather": weather,
+                    "Our Score": our_score,
+                    "Opponent Score": opponent_score,
+                    "Possession (%)": possession,
+                    "Shots": shots,
+                    "Shots on Target": shots_on_target,
+                    "Passes Attempted": passes_attempted,
+                    "Passes Completed": passes_completed,
+                    "Corners": corners,
+                    "Free Kicks": free_kicks,
+                    "Offsides": offsides,
+                    "Fouls Committed": fouls_committed,
+                    "Fouls Suffered": fouls_suffered,
+                    "Yellow Cards": yellow_cards,
+                    "Red Cards": red_cards,
+                    "Throw-Ins": throw_ins,
+                    "Goal Kicks": goal_kicks,
+                    "Player Goals": ", ".join(player_goals),
+                    "Player Assists": ", ".join(player_assists),
+                    "Player Shots": ", ".join(player_shots),
+                    "Player Passes": "",
+                    "Player Tackles": "",
+                    "Player Interceptions": "",
+                    "Player Dribbles": "",
+                    "Player Distance (km)": "",
+                    "Player Sprints": "",
+                    "Player Minutes": ", ".join(player_minutes),
+                    "Notes": notes,
+                    "Video Link": video_link,
+                    "Expected Goals (xG)": xg,
+                    "Opponent Expected Goals (xG)": opponent_xg,
+                    "Pass Completion (%)": pass_completion,
+                    "Possession Zones": possession_zones,
+                    "Expected Assists (xA)": xa,
+                    "Expected Threat (xT)": xt,
+                    "PPDA": ppda,
+                    "Progressive Passes": progressive_passes,
+                    "Line-Breaking Passes": line_breaking_passes,
+                    "Field Tilt (%)": field_tilt,
+                    "High Metabolic Load Distance (HMLD)": hmld,
+                    "Shot-Creating Actions (SCA)": sca,
+                    "Goal-Creating Actions (GCA)": gca,
+                    "Set Piece Outcomes": set_piece_outcomes,
+                    "Tackles Successful": tackles_successful,
+                    "Tackles Attempted": tackles_attempted,
+                    "Dribbles Successful": dribbles_successful,
+                    "Dribbles Attempted": dribbles_attempted,
+                    "Crosses Successful": crosses_successful,
+                    "Crosses Attempted": crosses_attempted
+                }
+                df = load_data("Matches")
+                df = pd.concat([df, pd.DataFrame([new_match])], ignore_index=True)
+                save_data(df, "Matches")
+                
+                if email_recipients:
+                    pdf_path = generate_pdf_report(new_match, tactical_analysis or "No analysis.")
+                    body = f"Match Summary\nTimestamp: {timestamp}\nDate: {date}\nOpponent: {opponent}\nScore: {our_score}-{opponent_score}\nVideo: {video_link}\nNotes: {notes}"
+                    send_email("Match Report", body, email_recipients.split(","), pdf_path)
+                
+                st.success("Match saved successfully!")
+                st.rerun()
+
+# Tab 2: Match History
+with tab2:
+    st.subheader("Match History")
+    df = load_data("Matches")
+    if not df.empty:
+        st.dataframe(df[["Timestamp", "Date", "Opponent", "Venue", "Our Score", "Opponent Score", "Possession (%)", "Shots", "Expected Goals (xG)", "Field Tilt (%)", "Notes", "Video Link"]], use_container_width=True)
+        
+        st.subheader("Performance Insights")
+        goals_df = pd.DataFrame({
+            "Type": ["Scored"] * len(df) + ["Conceded"] * len(df),
+            "Goals": list(df["Our Score"]) + list(df["Opponent Score"])
+        })
+        fig_goals = px.bar(
+            goals_df.groupby("Type").sum().reset_index(),
+            x="Type",
+            y="Goals",
+            title="Total Goals Scored vs. Conceded",
+            color="Type",
+            color_discrete_map={"Scored": "#2ECC40", "Conceded": "#FF4136"}
+        )
+        st.plotly_chart(fig_goals, use_container_width=True)
+        
+        fig_possession = px.line(
+            df,
+            x="Date",
+            y="Possession (%)",
+            title="Possession Over Time",
+            markers=True,
+            color_discrete_sequence=["#636EFA"]
+        )
+        st.plotly_chart(fig_possession, use_container_width=True)
+        
+        fig_xg = px.bar(
+            df,
+            x="Date",
+            y=["Expected Goals (xG)", "Opponent Expected Goals (xG)"],
+            title="Expected Goals (xG) per Match",
+            barmode="group",
+            color_discrete_sequence=["#2ECC40", "#FF4136"]
+        )
+        st.plotly_chart(fig_xg, use_container_width=True)
+        
+        fig_success = px.bar(
+            pd.DataFrame({
+                "Metric": ["Tackle Success", "Dribble Success", "Cross Success"],
+                "Success Rate (%)": [
+                    (df["Tackles Successful"].sum() / df["Tackles Attempted"].sum() * 100) if df["Tackles Attempted"].sum() > 0 else 0,
+                    (df["Dribbles Successful"].sum() / df["Dribbles Attempted"].sum() * 100) if df["Dribbles Attempted"].sum() > 0 else 0,
+                    (df["Crosses Successful"].sum() / df["Crosses Attempted"].sum() * 100) if df["Crosses Attempted"].sum() > 0 else 0
+                ]
+            }),
+            x="Metric",
+            y="Success Rate (%)",
+            title="Success Rates Across Matches",
+            color="Metric",
+            color_discrete_sequence=["#636EFA", "#EF553B", "#00CC96"]
+        )
+        st.plotly_chart(fig_success, use_container_width=True)
+        
+        if st.checkbox("Show Pitch Diagram"):
+            pitch = Pitch(pitch_color='grass', line_color='white')
+            fig, ax = pitch.draw()
+            selected_match = st.selectbox("Select Match for Diagram", df["Date"])
+            match_data = df[df["Date"] == selected_match].iloc[0]
+            shot_locations = match_data.get("Shot Locations", "")
+            if shot_locations:
+                for shot in shot_locations.split(";"):
+                    try:
+                        player, x, y = shot.split(":")
+                        x, y = float(x), float(y)
+                        pitch.scatter(x, y, ax=ax, color='red', s=100)
+                    except:
+                        pass
+                
+                def update(frame):
+                    ax.clear()
+                    pitch.draw(ax=ax)
+                    if frame < len(shot_locations.split(";")):
+                        shot = shot_locations.split(";")[frame]
+                        try:
+                            player, x, y = shot.split(":")
+                            x, y = float(x), float(y)
+                            pitch.scatter(x, y, ax=ax, color='blue', s=150)
+                        except:
+                            pass
+                    return ax
+                
+                ani = animation.FuncAnimation(fig, update, frames=len(shot_locations.split(";"))+1, interval=1000)
+                st.pyplot(fig)
+        
+        csv = df.to_csv(index=False)
+        st.download_button(
+            label="Download Match Data",
+            data=csv,
+            file_name="matches.csv",
+            mime="text/csv"
+        )
+    else:
+        st.info("No matches recorded yet.")
+
+# Tab 3: Training Plans
+with tab3:
+    st.subheader("Add Training Session")
+    with st.form("training_form"):
+        train_date = st.date_input("Session Date")
+        session_name = st.text_input("Session Name")
+        description = st.text_area("Description")
+        drills = st.text_area("Drills (e.g., 4v2 Rondo)")
+        train_submitted = st.form_submit_button("Save Session")
+        
+        if train_submitted:
+            new_session = {
+                "Timestamp": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "Date": train_date.strftime("%Y-%m-%d"),
+                "Session Name": session_name,
+                "Description": description,
+                "Drills": drills
+            }
+            df = load_data("Training")
+            df = pd.concat([df, pd.DataFrame([new_session])], ignore_index=True)
+            save_data(df, "Training")
+            st.success("Training session saved!")
+            st.rerun()
+    
+    st.subheader("Training History")
+    df = load_data("Training")
+    if not df.empty:
+        st.dataframe(df, use_container_width=True)
+
+# Tab 4: Player Roster
+with tab4:
+    st.subheader("Manage Player Roster")
+    with st.form("player_form"):
+        player_name = st.text_input("Player Name")
+        player_position = st.selectbox("Position", ["GK", "DF", "MF", "FW"])
+        player_photo = st.text_input("Photo URL (optional)")
+        avg_position = st.text_input("Average Position (x,y) (e.g., 50,30)")
+        player_submitted = st.form_submit_button("Add Player")
+        
+        if player_submitted:
+            new_player = {
+                "Name": player_name,
+                "Position": player_position,
+                "Photo URL": player_photo,
+                "Average Position (x,y)": avg_position,
+                "Created Timestamp": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
+            }
+            df = load_data("Players")
+            df = pd.concat([df, pd.DataFrame([new_player])], ignore_index=True)
+            save_data(df, "Players")
+            st.success("Player added!")
+            st.rerun()
+    
+    st.subheader("Current Roster")
+    df = load_data("Players")
+    if not df.empty:
+        st.dataframe(df, use_container_width=True)
+
+# Tab 5: Live Tracking
+with tab5:
+    st.subheader("Live Match Tracking")
+    with st.form("live_form"):
+        live_date = st.date_input("Match Date")
+        event_type = st.selectbox("Event Type", ["Goal", "Assist", "Shot", "Foul", "Yellow Card", "Red Card", "Tackle", "Dribble", "Cross"])
+        live_player = st.selectbox("Player", players)
+        success = st.checkbox("Successful (for Tackle, Dribble, Cross)")
+        live_details = st.text_input("Details (e.g., Goal at 1:30)")
+        collaborators = st.text_input("Collaborators (e.g., Assistant Coach)")
+        live_submitted = st.form_submit_button("Log Event")
+        
+        if live_submitted:
+            new_event = {
+                "Match Date": live_date.strftime("%Y-%m-%d"),
+                "Timestamp": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "Event Type": event_type + (" Successful" if success and event_type in ["Tackle", "Dribble", "Cross"] else ""),
+                "Player": live_player,
+                "Details": live_details,
+                "Collaborators": collaborators
+            }
+            df = load_data("LiveStats")
+            df = pd.concat([df, pd.DataFrame([new_event])], ignore_index=True)
+            save_data(df, "LiveStats")
+            st.success("Event logged!")
+            st.rerun()
+    
+    st.subheader("Live Events")
+    df = load_data("LiveStats")
+    if not df.empty:
+        st.dataframe(df, use_container_width=True)
+
+# Tab 6: Match Analysis
+with tab6:
+    st.subheader("Match Analysis")
+    df = load_data("Matches")
+    if not df.empty:
+        selected_match = st.selectbox("Select Match for Analysis", df["Date"])
+        match_data = df[df["Date"] == selected_match].iloc[0]
+        
+        st.write("**Team Analysis**")
+        st.write(f"Timestamp: {match_data['Timestamp']}")
+        st.write(f"Score: {match_data['Our Score']} - {match_data['Opponent Score']}")
+        st.write(f"Possession: {match_data['Possession (%)']}% (Opponent: {100 - match_data['Possession (%)']}%)")
+        st.write(f"Pass Completion: {match_data['Pass Completion (%)']:.1f}% ({match_data['Passes Completed']}/{match_data['Passes Attempted']})")
+        st.write(f"Shots: {match_data['Shots']} (On Target: {match_data['Shots on Target']})")
+        tackle_success = (match_data['Tackles Successful'] / match_data['Tackles Attempted'] * 100) if match_data['Tackles Attempted'] > 0 else 0
+        dribble_success = (match_data['Dribbles Successful'] / match_data['Dribbles Attempted'] * 100) if match_data['Dribbles Attempted'] > 0 else 0
+        cross_success = (match_data['Crosses Successful'] / match_data['Crosses Attempted'] * 100) if match_data['Crosses Attempted'] > 0 else 0
+        st.write(f"Tackles: {match_data['Tackles Successful']}/{match_data['Tackles Attempted']} ({tackle_success:.1f}%)")
+        st.write(f"Dribbles: {match_data['Dribbles Successful']}/{match_data['Dribbles Attempted']} ({dribble_success:.1f}%)")
+        st.write(f"Crosses: {match_data['Crosses Successful']}/{match_data['Crosses Attempted']} ({cross_success:.1f}%)")
+        st.write(f"Expected Goals (xG): {match_data['Expected Goals (xG)']:.1f} (Opponent: {match_data['Opponent Expected Goals (xG)']:.1f})")
+        st.write(f"Field Tilt: {match_data['Field Tilt (%)']}% (Opponent: {100 - match_data['Field Tilt (%)']}%)")
+        st.write(f"PPDA: {match_data['PPDA']}")
+        st.write(f"Set Pieces: {match_data['Set Piece Outcomes']}")
+        
+        st.write("**Player Analysis**")
+        st.write(f"Goals: {match_data['Player Goals']}")
+        st.write(f"Assists: {match_data['Player Assists']}")
+        st.write(f"Shot-Creating Actions (SCA): {match_data['Shot-Creating Actions (SCA)']}")
+        st.write(f"Goal-Creating Actions (GCA): {match_data['Goal-Creating Actions (GCA)']}")
+        st.write(f"Expected Assists (xA): {match_data['Expected Assists (xA)']:.1f}")
+        st.write(f"HMLD: {match_data['High Metabolic Load Distance (HMLD)']} km")
+        st.write(f"Evaluations: {match_data.get('Player Evaluations', '')}")
+        
+        st.write("**Tactical Analysis**")
+        st.write(f"Formation: {match_data['Formation']}")
+        st.write(f"Possession Zones: {match_data['Possession Zones']}")
+        st.write(f"Notes: {match_data['Notes']}")
+        
+        if st.checkbox("Show Player Heatmap"):
+            heatmap_fig = generate_heatmap(match_data.get("Formation Positions", ""))
+            st.pyplot(heatmap_fig)
+        
+        if st.button("Generate Match Report"):
+            pdf_path = generate_pdf_report(match_data, match_data.get('Tactical Analysis', 'No analysis.'))
+            with open(pdf_path, "rb") as f:
+                st.download_button(
+                    label="Download Match Report PDF",
+                    data=f,
+                    file_name="match_report.pdf",
+                    mime="application/pdf"
+                )
+
+# Tab 7: Opponent Scouting
+with tab7:
+    st.subheader("Add Opponent Scout")
+    with st.form("opponent_form"):
+        opp_name = st.text_input("Opponent Name")
+        opp_formation = st.text_input("Formation (e.g., 4-3-3)")
+        key_players = st.text_area("Key Players (e.g., Player1:ST)")
+        strengths = st.text_area("Strengths (e.g., Strong counter-attacks)")
+        weaknesses = st.text_area("Weaknesses (e.g., Weak left flank)")
+        opp_submitted = st.form_submit_button("Save Opponent")
+        
+        if opp_submitted:
+            new_opp = {
+                "Timestamp": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "Opponent Name": opp_name,
+                "Formation": opp_formation,
+                "Key Players": key_players,
+                "Strengths": strengths,
+                "Weaknesses": weaknesses
+            }
+            df = load_data("Opponents")
+            df = pd.concat([df, pd.DataFrame([new_opp])], ignore_index=True)
+            save_data(df, "Opponents")
+            st.success("Opponent saved!")
+            st.rerun()
+    
+    st.subheader("Opponent Data")
+    df = load_data("Opponents")
+    if not df.empty:
+        st.dataframe(df, use_container_width=True)
