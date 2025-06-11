@@ -1,6 +1,5 @@
-# .streamlit/config.toml
 [server]
-maxUploadSize = 20000  # in MB, effectively no limit
+maxUploadSize = 20000   # in MB, effectively no limit
 
 [theme]
 primaryColor = "#10B981"
@@ -9,6 +8,7 @@ secondaryBackgroundColor = "#FFFFFF"
 textColor = "#111827"
 font = "sans serif"
 baseFontSize = 16
+
 
 
 
