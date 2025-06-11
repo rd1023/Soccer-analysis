@@ -19,7 +19,8 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 # Allow large uploads (up to 2GB)
-st.set_option('server.maxUploadSize', 2048)
+os.environ['STREAMLIT_SERVER_MAX_UPLOAD_SIZE'] = '2048'
+
 # Custom CSS for clean look
 st.markdown(
     '''
