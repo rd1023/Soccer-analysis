@@ -1,6 +1,21 @@
-[server]
-# Increase max upload size to 20 GB (20000 MB)
-maxUploadSize = 20000
+\[server]
+
+# Increase the maximum upload size to effectively unlimited (in MB)
+
+# Server settings to remove upload caps
+
+maxUploadSize = 20000  # in MB, effectively unlimited
+
+\[theme]
+
+# Custom UI theme colors and fonts
+
+primaryColor = "#10B981"
+backgroundColor = "#F0F2F6"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#111827"
+font = "sans serif"
+baseFontSize = 16
 
 
 
